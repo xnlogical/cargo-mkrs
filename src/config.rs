@@ -1,6 +1,21 @@
+use std::{fmt::Debug,io,path::PathBuf};
+
+use toml::{Table,Value,map::Map,de::Error};
+
 #[derive(Debug)]
 pub struct Config {
     pub header: String,
+}
+
+#[derive(Debug)]
+enum HandleErr{
+    AccessDir(io::Error),
+    ReadPath(io::Error),
+    Parse(Error),
+    FailGet
+}
+fn show_err(err:impl Debug){
+    println!("{:?}",err)
 }
 
 impl Default for Config {
@@ -12,17 +27,40 @@ impl Default for Config {
 }
 
 pub fn get_config() -> Config {
-    fn inner() -> Option<Config> {
-        let mut path = std::env::current_dir().ok()?;
-        path.push(".mkrs");
-
-        let src = std::fs::read_to_string(path).ok()?;
-        let table: toml::Table = src.parse().ok()?;
-
-        let header = table.get("header")?.as_str()?.to_string();
-
-        Some(Config { header })
+    let path = load_path();
+    if let Err(err)=path{
+        show_err(err);
+        return Config::default()
     }
+    let mut p = path.unwrap();
+    p.push(".mkrs");
+    let table = try_path(p);
+    if let Err(err)=table{
+        show_err(err);
+        return Config::default()
+    }
+    let config = try_header(table.unwrap());
+    if let  Err(err)= config{
+        show_err(err);
+        return Config::default()
+    }
+    config.unwrap()
+}
 
-    inner().unwrap_or_default()
+fn load_path()->Result<PathBuf,HandleErr>{
+    std::env::current_dir().map_err(HandleErr::AccessDir)
+}
+
+fn try_path(path:PathBuf)->Result<Map<String,Value>,HandleErr>{
+    let src = std::fs::read_to_string(path).map_err(|err| HandleErr::ReadPath(err));
+    src.unwrap().parse::<Table>().map_err(|err|HandleErr::Parse(err))
+}
+
+fn try_header(table:Map<String,Value>)->Result<Config,HandleErr>{
+    match table.get("header"){
+        Some(t)=>{
+            return Ok(Config {header:(t.as_str().unwrap().to_string())})
+        },
+        None=>{return Err(HandleErr::FailGet)}
+    }
 }
